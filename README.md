@@ -9,7 +9,7 @@ The primary EXE files are in the dist folder -- these were made using PyInstalle
 The Python source files are also given and explained below should you want to use them instead.
 
 # Usage & Dependencies (Python Files)
-For now, the way to use the Python files is to use them with either a virtual environment or some other Python path that has the following:
+For now, the way to use the Python files (in the src file) is to use them with either a virtual environment or some other Python path that has the following:
 
 ## Python
 Requires version >=3.10
