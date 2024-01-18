@@ -34,7 +34,7 @@ JOB_SEARCH_TITLE = input("Job Title to Search For: ")
 JOB_SEARCH_LOCATION = input("Job Location Desired: ")
 NUM_RESULTS_PER_SITE = input("# Results Wanted (per site): ")
 if NUM_RESULTS_PER_SITE == '':
-    NUM_RESULTS_PER_SITE = 20
+    NUM_RESULTS_PER_SITE = 10
 else:
     NUM_RESULTS_PER_SITE = int(NUM_RESULTS_PER_SITE)
 if 'indeed' in USE_SITES or 'glassdoor' in USE_SITES:
@@ -84,7 +84,6 @@ SAVE_JOBS_CSV = True # No reason for this to not be done
 
 from jobspy import scrape_jobs
 from webbrowser import open as open_page
-from pandas import concat
 
 # Warnings
 if not SAVE_JOBS_CSV:
@@ -98,40 +97,53 @@ if not SAVE_JOBS_CSV:
 ## Step 0 - Get job postings ##
 print("\n#### STEP 0 - Getting initial job post data ####")
 print("(Do note that this is the longest step!)\n")
+
 # Get initial jobs
-completed_first = False
+## Yes this is an overly-complicated setup
+## My goal was to not need to import pandas just to use concat.
+## I could also convert the given data to a dict or something and 
+## work with that, but I rather not. 
+## Doing it all this way means I get to just have one df in the end,
+## and I don't have to alter it at all *shrug*
+good_sites = []
+print(f"Getting Jobs ... 0%     ", end='\r')
 for i, site in enumerate(USE_SITES):
-    # Attempt using this single site for getting job results
+    # Test another site
+    good_sites.append(site)
+
+    ## Job Spy ##
+    ## Thx Bunsly ##
     try:
-        ## Job Spy ##
-        ## Thx Bunsly ##
-        new_jobs = scrape_jobs(
-            site_name=[site],
+        # Attempt to get job data from the given sites
+        jobs = scrape_jobs(
+            site_name=good_sites,
             search_term=JOB_SEARCH_TITLE,
             location=JOB_SEARCH_LOCATION,
             results_wanted=NUM_RESULTS_PER_SITE,
             country_indeed=COUNTRY_FOR_SEARCH  # only needed for indeed / glassdoor
         )
 
-        if not completed_first:
-            jobs = new_jobs.copy()
-            completed_first = True
-            print(f"Currently gathered {len(jobs)} job posts")
-        else:
-            jobs = concat([new_jobs, jobs], ignore_index=True, sort=False)
-            print(f"Currently gathered {len(jobs)} job posts")
+        # Progress report
+        print(f"Getting Jobs ... {int(25*(i+1))}%       ", end='\r')
 
-    # If it fails (like with Indeed's 403 error), skip it
     except:
+        # Extra site didn't work, yeet it and continue
+        good_sites.pop(-1)
+
+        # Progress report
+        print(f"Getting Jobs ... {int(25*(i+1))}%       ", end='\r')
+
         continue
-print()
+
+# Progress report
+print(f"Getting Jobs ... 100%")
 
 # Verify Index
 jobs.index = [*range(len(jobs))]
 
 # Count and show some results
 initial_num_jobs = len(jobs)
-print(f"Got {len(jobs)} total job postings\n")
+print(f"Got {len(jobs)} total job postings!\n")
 
 
 ## Step 1 - Keywords filtering ##
@@ -290,32 +302,44 @@ for _ in range(3):
 print(f"\nTotal Dropped Jobs: {len(dropped_indices)}")
 print(f"Remaining Number of Jobs = {len(jobs)}\n")
 
+# If desired to remove columns with not a lot of data
+if DROP_EXTRA_COLUMNS:
+    ## Step 4 - Get rid of extra data ##
+    print("\n#### STEP 4 - Reduce the number of columns by removing (generally) not as useful ones ####\n")
+    # Drop some columns that are generally excess data with lots of NoneTypes or just not as useful data
+    all_columns = set(jobs.columns)
 
+    # Check number of unique entries in each col_to_drop
+    # if over 33% of postings have data, keep the column
+    for cname in COLUMNS_TO_DROP[::-1]:
+        if jobs[cname].nunique() >= 0.33*len(jobs):
+            COLUMNS_TO_DROP.pop(COLUMNS_TO_DROP.index(cname))
 
-## Step 4 - Get rid of extra data ##
-print("\n#### STEP 4 - Reduce the number of columns by removing (generally) not as useful ones ####\n")
-# Drop some columns that are generally excess data with lots of NoneTypes or just not as useful data
-all_columns = set(jobs.columns)
+    # Calculate remaining columns to keep
+    keep_columns = all_columns.difference(COLUMNS_TO_DROP)
 
-# Check number of unique entries in each col_to_drop
-# if over 33% of postings have data, keep the column
-for ci, cname in enumerate(COLUMNS_TO_DROP[::-1]):
-    if jobs[cname].nunique() >= 0.33*len(jobs):
-        COLUMNS_TO_DROP.pop(ci)
+    # Keep this order for the base columns/info
+    first_cols = ['title', 'location', 'company', 'max_amount', 'min_amount', 'job_url']
+    keep_columns = keep_columns.difference(first_cols)
+    keep_columns = first_cols + list(keep_columns)
 
-# Calculate remaining columns to keep
-keep_columns = all_columns.difference(COLUMNS_TO_DROP)
+    print(f"Removed {len(all_columns) - len(keep_columns)} Columns")
+    print(f"Names of columns removed: {COLUMNS_TO_DROP}\n")
 
-# Keep this order for the base columns/info
-first_cols = ['title', 'location', 'company', 'max_amount', 'min_amount', 'job_url']
-keep_columns = keep_columns.difference(first_cols)
-keep_columns = first_cols + list(keep_columns)
+    # Set minimalized job columns
+    jobs = jobs[keep_columns]
 
-print(f"Removed {len(all_columns) - len(keep_columns)} Columns")
-print(f"Names of columns removed: {COLUMNS_TO_DROP}\n")
+# If not desired to drop columns with not a lot of data
+else:
+    print("\n#### STEP 4 - Removing excessive columns ####\n")
+    print("Step skipped as requested! All columns will be kept\n")
 
-# Set minimalized job columns
-jobs = jobs[keep_columns]
+    # Sike, organize columns still
+    first_cols = ['title', 'location', 'company', 'max_amount', 'min_amount', 'job_url']
+    all_columns = set(jobs.columns)
+    ordered_columns = first_cols + list(all_columns.difference(set(first_cols)))
+    assert len(ordered_columns) == len(jobs.columns)
+    jobs = jobs[ordered_columns]
 
 # Save results
 if SAVE_JOBS_CSV:
@@ -341,9 +365,20 @@ if DO_APPLY_LOOP:
         print(f"Job #{ind+1}:")
         print(f"Title: {jobs['title'][ind]}")
         print(f"Location: {jobs['location'][ind]}")
-        print(f"Salary: ${jobs['min_amount'][ind]}-${jobs['max_amount'][ind]}")
         print(f"Company: {jobs['company'][ind]}")
 
+        # Give appropriate vals for min/max salary including if missing
+        min_sal = jobs['min_amount'][ind]
+        max_sal = jobs['max_amount'][ind]
+
+        if min_sal == None:
+            min_sal = '???'
+        if max_sal == None:
+            max_sal = '???'
+
+        print(f"Salary: ${min_sal}-${max_sal}")
+
+        # Get input about applying
         do_apply = input("Apply to job (skips otherwise)? (y/n): ")
 
         # Check if wants to apply to current job
